@@ -88,7 +88,7 @@ const addItemToCart = async (userId, req) => {
       const cartItem = new CartItem({
         product: product._id,
         cart: cart._id,
-        quantity: 1,
+        quantity: req.quantity || 1,
         userId,
         price: product.price,
         size: req.size,
