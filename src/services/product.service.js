@@ -100,6 +100,11 @@ const findProductById = async (productId) => {
 /**
  * Fetch all products with filters, sorting, pagination
  */
+// helper to escape regex special chars
+function escapeRegExp(string = "") {
+  return String(string).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 const getAllProducts = async (reqQuery) => {
   let {
     category,
@@ -112,12 +117,16 @@ const getAllProducts = async (reqQuery) => {
     sort,
     stock,
     pageNumber = 1,
-    pageSize = 10
-  } = reqQuery;
+    pageSize = 10,
+  } = reqQuery || {};
+
+  // normalize page & size
+  pageNumber = Number(pageNumber) || 1;
+  pageSize = Number(pageSize) || 10;
 
   let query = Product.find().populate("category");
 
-  // --- 1️⃣ Filter by Category ---
+  // --- Category ---
   if (category) {
     const foundCategory = await Category.findOne({ name: category });
     if (foundCategory) {
@@ -127,50 +136,92 @@ const getAllProducts = async (reqQuery) => {
     }
   }
 
-  // --- 2️⃣ Filter by Brand ---
-  if (brand) query = query.where("brand").equals(brand);
+  // --- Brand ---
+  if (brand) {
+    // handle brand as array or string
+    const brandArr = Array.isArray(brand)
+      ? brand.map((b) => String(b).trim()).filter(Boolean)
+      : String(brand).split(",").map((b) => b.trim()).filter(Boolean);
 
-  // --- 3️⃣ Filter by Color ---
+    if (brandArr.length === 1) query = query.where("brand").equals(brandArr[0]);
+    else if (brandArr.length > 1)
+      query = query.where("brand").in(brandArr.map((b) => new RegExp(`^${escapeRegExp(b)}$`, "i")));
+  }
+
+  // --- Color (supports string "a,b,c" OR array ['a','b']) ---
   if (color) {
-    const colorSet = new Set(color.split(",").map((c) => c.trim().toLowerCase()));
-    const colorRegex = new RegExp([...colorSet].join("|"), "i");
-    query = query.where("color").regex(colorRegex);
+    const colorArr = Array.isArray(color)
+      ? color.map((c) => String(c).trim()).filter(Boolean)
+      : String(color).split(",").map((c) => c.trim()).filter(Boolean);
+
+    if (colorArr.length > 0) {
+      const regexes = colorArr.map((c) => new RegExp(`^${escapeRegExp(c)}$`, "i"));
+      // match either color field equals one of them OR color array contains one of them
+      query = query.where({
+        $or: [{ color: { $in: regexes } }, { color: { $elemMatch: { $in: regexes } } }],
+      });
+    }
   }
 
-  // --- 4️⃣ Filter by Size ---
+  // --- Size (supports string "xs,s,m" OR array ['xs','s']) ---
   if (size) {
-    const sizeSet = new Set(size.split(","));
-    query = query.where("size.name").in([...sizeSet]);
+    const sizeArr = Array.isArray(size)
+      ? size.map((s) => String(s).trim()).filter(Boolean)
+      : String(size).split(",").map((s) => s.trim()).filter(Boolean);
+
+    if (sizeArr.length > 0) {
+      const sizeRegexes = sizeArr.map((s) => new RegExp(`^${escapeRegExp(s)}$`, "i"));
+      // match size subdocument name
+      query = query.where({ "size.name": { $in: sizeRegexes } });
+    }
   }
 
-  // --- 5️⃣ Price Range ---
-  if (minPrice && maxPrice) {
-    query = query.where("discountedPrice").gte(minPrice).lte(maxPrice);
+  // --- Price Range (coerce to numbers) ---
+  const min = minPrice !== undefined ? Number(minPrice) : undefined;
+  const max = maxPrice !== undefined ? Number(maxPrice) : undefined;
+  if (!Number.isNaN(min) && !Number.isNaN(max) && min !== undefined && max !== undefined) {
+    query = query.where("discountedPrice").gte(min).lte(max);
+  } else if (!Number.isNaN(min) && min !== undefined && (max === undefined || Number.isNaN(max))) {
+    query = query.where("discountedPrice").gte(min);
+  } else if (!Number.isNaN(max) && max !== undefined) {
+    query = query.where("discountedPrice").lte(max);
   }
 
-  // --- 6️⃣ Minimum Discount ---
-  if (minDiscount) query = query.where("discountPercentage").gte(minDiscount);
+  // --- Minimum Discount ---
+  if (minDiscount !== undefined && !Number.isNaN(Number(minDiscount))) {
+    query = query.where("discountPercentage").gte(Number(minDiscount));
+  }
 
-  // --- 7️⃣ Stock Filter ---
+  // --- Stock ---
   if (stock === "in_stock") query = query.where("quantity").gt(0);
   else if (stock === "out_of_stock") query = query.where("quantity").equals(0);
 
-  // --- 8️⃣ Sorting ---
+  // --- Sorting ---
   if (sort) {
-    const sortDirection = sort === "price_high" ? -1 : 1;
-    query = query.sort({ discountedPrice: sortDirection });
+    if (sort === "price_high") query = query.sort({ discountedPrice: -1 });
+    else if (sort === "price_low") query = query.sort({ discountedPrice: 1 });
+    else if (sort === "newest") query = query.sort({ createdAt: -1 });
   }
 
-  // --- 9️⃣ Pagination ---
-  const totalProducts = await query.clone().countDocuments(); // clone() to reuse query
+  // debug: log the final filter (remove in production if noisy)
+  try {
+    // query.getFilter() works in Mongoose 5.9+, fallback to _conditions
+    const applied = typeof query.getFilter === "function" ? query.getFilter() : query._conditions;
+    console.log("APPLIED FILTER:", JSON.stringify(applied, null, 2));
+  } catch (e) {
+    console.log("APPLIED FILTER (error retrieving):", e);
+  }
+
+  // --- Pagination & execute ---
+  const totalProducts = await query.clone().countDocuments();
   const skip = (pageNumber - 1) * pageSize;
   const products = await query.skip(skip).limit(pageSize).exec();
   const totalPages = Math.ceil(totalProducts / pageSize);
 
   return {
     content: products,
-    currentPage: parseInt(pageNumber),
-    totalPages
+    currentPage: pageNumber,
+    totalPages,
   };
 };
 
