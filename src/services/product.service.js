@@ -107,6 +107,7 @@ function escapeRegExp(string = "") {
 
 const getAllProducts = async (reqQuery) => {
   let {
+    title,
     category,
     brand,
     color,
@@ -125,6 +126,23 @@ const getAllProducts = async (reqQuery) => {
   pageSize = Number(pageSize) || 10;
 
   let query = Product.find().populate("category");
+
+  if (title) {
+    const t = Array.isArray(title)
+      ? title.find(Boolean) || ""
+      : String(title || "").trim();
+
+    if (t.length > 0) {
+
+      query = query.where({ $text: { $search: t } });
+      query = query.select({ score: { $meta: "textScore" } });
+
+      if (!reqQuery.sort) {
+        query = query.sort({ score: { $meta: "textScore" } });
+      }
+    }
+  }
+
 
   // --- Category ---
   if (category) {
