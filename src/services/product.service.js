@@ -72,8 +72,13 @@ const createProduct = async (reqData) => {
  * Delete a product by ID
  */
 const deleteProduct = async (productId) => {
-  await Product.findByIdAndDelete(productId);
-  return { message: "Product deleted successfully" };
+  const deleted = await Product.findByIdAndDelete(productId);
+  if (!deleted) {
+    const err = new Error(`Product not found with id: ${productId}`);
+    err.status = 404;
+    throw err;
+  }
+  return deleted;
 };
 
 /**

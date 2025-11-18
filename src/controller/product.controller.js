@@ -75,11 +75,13 @@ const updateProduct = async (req, res) => {
  */
 const deleteProduct = async (req, res) => {
   try {
-    await productService.deleteProduct(req.params.id);
-    return res.status(200).json({ message: "Product deleted successfully" });
+    const deleted = await productService.deleteProduct(req.params.id);
+    return res.status(200).json({ message: "Product deleted successfully", deleted });
   } catch (error) {
     console.error("Error deleting product:", error.message);
-    return res.status(404).json({ message: error.message || "Product not found" });
+    // if service set a status (like 404), use it; otherwise default to 500
+    const status = error.status || 500;
+    return res.status(status).json({ message: error.message || "Product not found" });
   }
 };
 
