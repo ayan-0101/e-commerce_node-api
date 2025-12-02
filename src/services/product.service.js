@@ -138,13 +138,10 @@ const getAllProducts = async (reqQuery) => {
       : String(title || "").trim();
 
     if (t.length > 0) {
-
-      query = query.where({ $text: { $search: t } });
-      query = query.select({ score: { $meta: "textScore" } });
-
-      if (!reqQuery.sort) {
-        query = query.sort({ score: { $meta: "textScore" } });
-      }
+      const safe = escapeRegExp(t);
+      query = query.where({
+        title: { $regex: safe, $options: "i" },
+      });
     }
   }
 

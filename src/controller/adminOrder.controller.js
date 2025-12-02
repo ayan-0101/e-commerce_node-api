@@ -1,20 +1,26 @@
 const orderService = require('../services/order.service');
 
 /**
- * @desc Get all orders (Admin only)
+ * @desc Get all orders (Admin only) - paginated
+ * Query params:
+ *   pageNumber (default 1)
+ *   pageSize   (default 10)
+ *   status     (optional, e.g. PENDING, DELIVERED)
+ *   userId     (optional filter by user)
  */
 const getAllOrders = async (req, res) => {
   try {
-    const orders = await orderService.allOrders();
+    const ordersPage = await orderService.allOrders(req.query); 
+
     return res.status(200).json({
       success: true,
       message: "All orders fetched successfully",
-      data: orders
+      data: ordersPage,
     });
   } catch (error) {
-    return res.status(500).json({ 
+    return res.status(500).json({
       success: false,
-      message: error.message || 'Error fetching orders' 
+      message: error.message || "Error fetching orders",
     });
   }
 };
@@ -28,33 +34,38 @@ const getOrderById = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Order fetched successfully",
-      data: order
+      data: order,
     });
   } catch (error) {
-    return res.status(404).json({ 
+    return res.status(404).json({
       success: false,
-      message: error.message || 'Order not found' 
+      message: error.message || "Order not found",
     });
   }
 };
 
 /**
- * @desc Get all orders for the logged-in user (Order history)
+ * @desc Get all orders for the logged-in user (Order history) - paginated
+ * Query params:
+ *   pageNumber (default 1)
+ *   pageSize   (default 10)
+ *   status     (optional, e.g. DELIVERED)
  */
 const getUserOrderHistory = async (req, res) => {
   try {
     const userId = req.user._id;
-    const orders = await orderService.userOrderHistory(userId);
+    const ordersPage = await orderService.userOrderHistory(userId, req.query);
 
     return res.status(200).json({
       success: true,
       message: "User order history fetched successfully",
-      data: orders
+      // ordersPage = { content, currentPage, totalPages, totalElements }
+      data: ordersPage,
     });
   } catch (error) {
-    return res.status(404).json({ 
+    return res.status(404).json({
       success: false,
-      message: error.message || 'No order history found for this user' 
+      message: error.message || "No order history found for this user",
     });
   }
 };
@@ -71,12 +82,12 @@ const createOrder = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: "Order created successfully",
-      data: newOrder
+      data: newOrder,
     });
   } catch (error) {
-    return res.status(400).json({ 
+    return res.status(400).json({
       success: false,
-      message: error.message || 'Error creating order' 
+      message: error.message || "Error creating order",
     });
   }
 };
@@ -88,27 +99,26 @@ const updateOrderStatus = async (req, res) => {
   try {
     const { orderId, status } = req.body;
 
-    // ✅ Allow only valid status transitions
-    const validStatuses = ['PLACED', 'CONFIRMED', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
+    const validStatuses = ["PLACED", "CONFIRMED", "SHIPPED", "DELIVERED", "CANCELLED"];
     if (!validStatuses.includes(status)) {
-      return res.status(400).json({ message: 'Invalid order status' });
+      return res.status(400).json({ message: "Invalid order status" });
     }
 
     const updatedOrder = await orderService.updateOrderStatus(
       orderId,
       status,
-      status === 'PLACED'
+      status === "PLACED"
     );
 
     return res.status(200).json({
       success: true,
       message: "Order status updated successfully",
-      data: updatedOrder
+      data: updatedOrder,
     });
   } catch (error) {
-    return res.status(500).json({ 
+    return res.status(500).json({
       success: false,
-      message: error.message || 'Error updating order status' 
+      message: error.message || "Error updating order status",
     });
   }
 };
@@ -121,17 +131,16 @@ const deleteOrder = async (req, res) => {
     await orderService.deleteOrder(req.params.id);
     return res.status(200).json({
       success: true,
-      message: 'Order deleted successfully'
+      message: "Order deleted successfully",
     });
   } catch (error) {
-    return res.status(404).json({ 
+    return res.status(404).json({
       success: false,
-      message: error.message || 'Order not found' 
+      message: error.message || "Order not found",
     });
   }
 };
 
-// ✅ Export all controller methods
 module.exports = {
   getAllOrders,
   getOrderById,
