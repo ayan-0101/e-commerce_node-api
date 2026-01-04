@@ -4,9 +4,108 @@ const { CartItem } = require("../models/cartItem.model");
 const { Address } = require("../models/address.model");
 const { OrderItems } = require("../models/orderItems.model");
 
-
+/**
+ * Create a new order from user's cart
+ * @param {Object} user - The authenticated user object
+ * @param {Object} shippingAddressData - Shipping address details
+ * @returns {Object} The created order
+ */
 const createOrder = async (user, shippingAddressData) => {
-  // ... your existing createOrder code unchanged ...
+  try {
+    // 1. Find user's cart
+    const cart = await Cart.findOne({ user: user._id });
+    
+    if (!cart) {
+      throw new Error("Cart not found for this user");
+    }
+
+    // 2. Get all cart items with product details
+    const cartItems = await CartItem.find({ cart: cart._id })
+      .populate('product')
+      .exec();
+
+    if (!cartItems || cartItems.length === 0) {
+      throw new Error("Cart is empty. Please add items before creating an order.");
+    }
+
+    // 3. Create shipping address
+    const shippingAddress = new Address({
+      firstName: shippingAddressData.firstName,
+      lastName: shippingAddressData.lastName,
+      streetAddress: shippingAddressData.streetAddress,
+      city: shippingAddressData.city,
+      state: shippingAddressData.state,
+      zipCode: shippingAddressData.zipCode,
+      mobile: shippingAddressData.mobile,
+      user: user._id,
+    });
+
+    const savedAddress = await shippingAddress.save();
+
+    // 4. Create order items from cart items
+    const orderItemsPromises = cartItems.map(async (cartItem) => {
+      const orderItem = new OrderItems({
+        product: cartItem.product._id,
+        size: cartItem.size,
+        quantity: cartItem.quantity,
+        price: cartItem.price,
+        discountedPrice: cartItem.discountedPrice,
+        userId: user._id,
+      });
+      return await orderItem.save();
+    });
+
+    const orderItems = await Promise.all(orderItemsPromises);
+
+    // 5. Calculate totals
+    const totalPrice = cart.totalPrice || 0;
+    const totalDiscountedPrice = cart.totalDiscountedPrice || 0;
+    const discount = cart.discount || 0;
+    const totalItem = cart.totalItem || cartItems.length;
+
+    // 6. Create the order
+    const order = new Order({
+      user: user._id,
+      orderItems: orderItems.map(item => item._id),
+      totalPrice: totalPrice,
+      totalDiscountedPrice: totalDiscountedPrice,
+      discount: discount,
+      totalItem: totalItem,
+      shippingAddress: savedAddress._id,
+      orderDate: new Date(),
+      orderStatus: "PENDING",
+      paymentDetails: {
+        paymentMethod: "PENDING",
+        paymentStatus: "PENDING",
+      },
+    });
+
+    const savedOrder = await order.save();
+
+    // 7. Clear the cart after order creation
+    await CartItem.deleteMany({ cart: cart._id });
+    cart.cartItems = [];
+    cart.totalPrice = 0;
+    cart.totalItem = 0;
+    cart.totalDiscountedPrice = 0;
+    cart.discount = 0;
+    await cart.save();
+    
+
+    // 8. Populate the order before returning
+    const populatedOrder = await Order.findById(savedOrder._id)
+      .populate('user', 'firstName lastName email')
+      .populate('shippingAddress')
+      .populate({
+        path: 'orderItems',
+        populate: { path: 'product' }
+      });
+
+
+    return populatedOrder;
+  } catch (error) {
+    throw error;
+  }
 };
 
 const allOrders = async (reqQuery = {}) => {
@@ -23,12 +122,10 @@ const allOrders = async (reqQuery = {}) => {
   const filter = {};
 
   if (status) {
-    // e.g. ?status=PENDING
     filter.orderStatus = status;
   }
 
   if (userId) {
-    // optional filter by specific user (admin side)
     filter.user = userId;
   }
 
@@ -40,7 +137,6 @@ const allOrders = async (reqQuery = {}) => {
     })
     .sort({ orderDate: -1 });
 
-  // count before pagination
   const totalElements = await Order.countDocuments(filter);
   const skip = (pageNumber - 1) * pageSize;
 
@@ -55,11 +151,6 @@ const allOrders = async (reqQuery = {}) => {
   };
 };
 
-/**
- * 👤 Get user's order history with pagination
- * @param {String|ObjectId} userId
- * @param {Object} reqQuery - supports pageNumber, pageSize, status
- */
 const userOrderHistory = async (userId, reqQuery = {}) => {
   let {
     pageNumber = 1,
@@ -97,7 +188,6 @@ const userOrderHistory = async (userId, reqQuery = {}) => {
   };
 };
 
-
 const findOrderById = async (id) => {
   const order = await Order.findById(id)
     .populate("user", "firstName lastName email")
@@ -110,7 +200,6 @@ const findOrderById = async (id) => {
   return order;
 };
 
-
 const updateOrderStatus = async (orderId, status) => {
   const order = await Order.findById(orderId);
   if (!order) throw new Error("Order not found");
@@ -118,7 +207,6 @@ const updateOrderStatus = async (orderId, status) => {
   await order.save();
   return order;
 };
-
 
 const deleteOrder = async (id) => {
   const deletedOrder = await Order.findByIdAndDelete(id);
